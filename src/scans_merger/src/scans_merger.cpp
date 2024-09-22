@@ -5,7 +5,12 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/synchronizer.h>
+
 #include <rclcpp/qos.hpp>
+
 
 class CloudMergerNode : public rclcpp::Node
 {
@@ -24,11 +29,14 @@ public:
         input_cloud_2_ = this->get_parameter("input_cloud_2").as_string();
         merged_cloud_ = this->get_parameter("merged_cloud").as_string();
 
-        // Subscriber to the two point cloud topics with the matching QoS
-        cloud_sub_1_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            input_cloud_1_, rclcpp::SensorDataQoS(), std::bind(&CloudMergerNode::cloudCallback1, this, std::placeholders::_1));
-        cloud_sub_2_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-            input_cloud_2_, rclcpp::SensorDataQoS(), std::bind(&CloudMergerNode::cloudCallback2, this, std::placeholders::_1));
+        // Set up message filters for synchronization
+        rclcpp::QoS qos_sub = rclcpp::QoS(rclcpp::SensorDataQoS());
+
+        cloud_sub_1_.subscribe(this, input_cloud_1_, qos_sub.get_rmw_qos_profile());
+        cloud_sub_2_.subscribe(this, input_cloud_2_, qos_sub.get_rmw_qos_profile());
+
+        sync_.reset(new Sync(SyncPolicy(10), cloud_sub_1_, cloud_sub_2_));
+        sync_->registerCallback(std::bind(&CloudMergerNode::syncCallback, this, std::placeholders::_1, std::placeholders::_2));
 
         // Publisher for the merged point cloud
         rclcpp::QoS qos((rclcpp::SystemDefaultsQoS().keep_last(1).durability_volatile()));
@@ -42,46 +50,31 @@ public:
     }
 
 private:
-    void cloudCallback1(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+    void syncCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud1,
+                      const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud2)
     {
-        latest_cloud_1_ = *msg;
-        tryMerge();
-    }
-
-    void cloudCallback2(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
-    {
-        latest_cloud_2_ = *msg;
-        tryMerge();
-    }
-
-    void tryMerge()
-    {
-        if (latest_cloud_1_.header.stamp.sec == 0 || latest_cloud_2_.header.stamp.sec == 0)
-        {
-            // If we haven't received both clouds, skip merging
-            return;
-        }
-
         sensor_msgs::msg::PointCloud2 transformed_cloud_1;
         sensor_msgs::msg::PointCloud2 transformed_cloud_2;
 
-        if (transformCloudToTargetFrame(latest_cloud_1_, transformed_cloud_1) &&
-            transformCloudToTargetFrame(latest_cloud_2_, transformed_cloud_2))
+        RCLCPP_INFO(this->get_logger(), "Cloud merger node started.");
+
+        if (transformCloudToTargetFrame(*cloud1, transformed_cloud_1) &&
+            transformCloudToTargetFrame(*cloud2, transformed_cloud_2))
         {
             // Convert ROS PointCloud2 messages to PCL types
-            pcl::PointCloud<pcl::PointXYZ> pcl_cloud_1;
-            pcl::PointCloud<pcl::PointXYZ> pcl_cloud_2;
+            pcl::PointCloud<pcl::PointXYZI> pcl_cloud_1;
+            pcl::PointCloud<pcl::PointXYZI> pcl_cloud_2;
             pcl::fromROSMsg(transformed_cloud_1, pcl_cloud_1);
             pcl::fromROSMsg(transformed_cloud_2, pcl_cloud_2);
 
             // Merge the clouds
-            pcl::PointCloud<pcl::PointXYZ> merged_cloud = pcl_cloud_1 + pcl_cloud_2;
+            pcl::PointCloud<pcl::PointXYZI> merged_cloud = pcl_cloud_1 + pcl_cloud_2;
 
             // Convert back to ROS PointCloud2
             sensor_msgs::msg::PointCloud2 output_cloud;
             pcl::toROSMsg(merged_cloud, output_cloud);
             output_cloud.header.frame_id = destination_frame_;
-            output_cloud.header.stamp = this->get_clock()->now();
+            output_cloud.header.stamp = transformed_cloud_1.header.stamp;
 
             // Publish the merged cloud
             merged_cloud_pub_->publish(output_cloud);
@@ -108,13 +101,15 @@ private:
         }
     }
 
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_1_;
-    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_2_;
+    // Message filter subscribers
+    message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_sub_1_;
+    message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_sub_2_;
+
+    using SyncPolicy = message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, sensor_msgs::msg::PointCloud2>;
+    using Sync = message_filters::Synchronizer<SyncPolicy>;
+    std::shared_ptr<Sync> sync_;
+
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr merged_cloud_pub_;
-
-    sensor_msgs::msg::PointCloud2 latest_cloud_1_;
-    sensor_msgs::msg::PointCloud2 latest_cloud_2_;
-
     std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
     std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
