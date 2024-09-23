@@ -29,10 +29,8 @@ ament_target_dependencies(scans_merger
   Eigen3
 )
 
-install(TARGETS
-scans_merger
-  DESTINATION lib/${PROJECT_NAME}
-)
+install(TARGETS scans_merger DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME}/)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
