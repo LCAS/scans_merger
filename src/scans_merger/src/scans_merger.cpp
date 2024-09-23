@@ -11,7 +11,6 @@
 
 #include <rclcpp/qos.hpp>
 
-
 class CloudMergerNode : public rclcpp::Node
 {
 public:
@@ -39,7 +38,8 @@ public:
         sync_->registerCallback(std::bind(&CloudMergerNode::syncCallback, this, std::placeholders::_1, std::placeholders::_2));
 
         // Publisher for the merged point cloud
-        rclcpp::QoS qos((rclcpp::SystemDefaultsQoS().keep_last(1).durability_volatile()));
+        rclcpp::QoS qos = rclcpp::QoS(10);  // Adjust queue size based on your system's need
+        qos.best_effort();  // Ensure it matches the reliability requirements
         merged_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(merged_cloud_, qos);
 
         // Initialize the TF2 buffer and listener
@@ -58,6 +58,8 @@ private:
 
         RCLCPP_INFO(this->get_logger(), "Cloud merger node started.");
 
+        auto start = this->get_clock()->now();
+
         if (transformCloudToTargetFrame(*cloud1, transformed_cloud_1) &&
             transformCloudToTargetFrame(*cloud2, transformed_cloud_2))
         {
@@ -70,20 +72,40 @@ private:
             // Merge the clouds
             pcl::PointCloud<pcl::PointXYZI> merged_cloud = pcl_cloud_1 + pcl_cloud_2;
 
+            // Print the size of the merged cloud
+            RCLCPP_INFO(this->get_logger(), "pcl_cloud_1 cloud size: %zu", pcl_cloud_1.size());
+            RCLCPP_INFO(this->get_logger(), "pcl_cloud_2 cloud size: %zu", pcl_cloud_2.size());
+            RCLCPP_INFO(this->get_logger(), "Merged point cloud size: %zu", merged_cloud.size());
+
             // Convert back to ROS PointCloud2
             sensor_msgs::msg::PointCloud2 output_cloud;
             pcl::toROSMsg(merged_cloud, output_cloud);
             output_cloud.header.frame_id = destination_frame_;
             output_cloud.header.stamp = transformed_cloud_1.header.stamp;
 
+
             // Publish the merged cloud
-            merged_cloud_pub_->publish(output_cloud);
+            merged_cloud_pub_->publish(std::move(output_cloud));
+
+            // map_publisher_->publish(output_cloud);
+
         }
+
+        auto end = this->get_clock()->now();
+        RCLCPP_INFO(this->get_logger(), "Merging took: %f seconds", (end - start).seconds());
+
+
     }
 
     bool transformCloudToTargetFrame(const sensor_msgs::msg::PointCloud2 &input_cloud,
                                      sensor_msgs::msg::PointCloud2 &output_cloud)
     {
+
+        if (!tf_buffer_->canTransform(destination_frame_, input_cloud.header.frame_id, tf2::TimePointZero, tf2::durationFromSec(0.05))) {
+            RCLCPP_WARN(this->get_logger(), "Transform not available yet...");
+            return false;
+        }
+
         try
         {
             // Get the transformation from the point cloud's frame to the destination_frame
