@@ -16,7 +16,6 @@
   <depend>laser_geometry</depend>
   <depend>tf2_ros</depend>
   <depend>tf2</depend>
-  <depend>Eigen3</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
