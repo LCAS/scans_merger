@@ -1,10 +1,11 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>scans_merger</name>
+  <name>duatic_cloud_merger</name>
   <version>0.0.1</version>
   <description>A ROS 2 package for merging multiple point cloud scan topics into a single point cloud output.</description>
-  <maintainer email="ibrahim.hroub7@gmail.com">ibrahim</maintainer>
+  <author email="ibrahim.hroub7@gmail.com">Ibrahim Hroob</author>
+  <maintainer email="mbloechlinger@duatic.com">Marc Blöchlinger</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -16,9 +17,7 @@
   <depend>laser_geometry</depend>
   <depend>tf2_ros</depend>
   <depend>tf2</depend>
-
-  <test_depend>ament_lint_auto</test_depend>
-  <test_depend>ament_lint_common</test_depend>
+  <depend>message_filters</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
